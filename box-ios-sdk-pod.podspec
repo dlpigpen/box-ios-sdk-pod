@@ -16,7 +16,7 @@ Pod::Spec.new do |spec|
   #
 
   spec.name         = "box-ios-sdk-pod"
-  spec.version      = "0.0.1"
+  spec.version      = "0.0.2"
   spec.summary      = "A other version of box ios sdk pod. Helper-Framework that save your time to work with cloud storage services"
 
   # This description is used to generate tags and improve search results.
@@ -65,7 +65,7 @@ Pod::Spec.new do |spec|
   #
 
   # spec.platform     = :ios
-  # spec.platform     = :ios, "9.3"
+  spec.platform     = :ios, "7.0"
 
   #  When using multiple platforms
   # spec.ios.deployment_target = "5.0"
@@ -91,10 +91,10 @@ Pod::Spec.new do |spec|
   #  Not including the public_header_files will make all headers public.
   #
 
-  spec.source_files  = "BoxContentSDK", "BoxContentSDK/**/*.{h,m}"
-  spec.exclude_files = "BoxContentSDK/Exclude"
+  spec.source_files  = "BoxContentSDK/BoxContentSDK/*.{h,m}", "BoxContentSDK/BoxContentSDK/**/*.{h,m}"
+  #mspec.exclude_files = "BoxContentSDK/BoxContentSDK/External/ISO8601DateFormatter/BOXISO8601DateFormatter.{h,m}", "BoxContentSDK/BoxContentSDK/External/KeychainItemWrapper/BOXKeychainItemWrapper.{h,m}"
 
-  # spec.public_header_files = "Classes/**/*.h"
+  spec.public_header_files = "BoxContentSDK/BoxContentSDK/*.h", "BoxContentSDK/BoxContentSDK/**/*.h"
 
 
   # ――― Resources ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
@@ -117,21 +117,37 @@ Pod::Spec.new do |spec|
   #  the lib prefix of their name.
   #
 
-  # spec.framework  = "SomeFramework"
-  # spec.frameworks = "SomeFramework", "AnotherFramework"
+  #spec.framework  = "UIKit"
+  spec.frameworks = "Security", "QuartzCore", "AssetsLibrary"
+  spec.header_dir = 'BoxContentSDK'
 
   # spec.library   = "iconv"
   # spec.libraries = "iconv", "xml2"
+  spec.static_framework = true
+  spec.resource_bundles = {
+    'BoxContentSDKResources' =>  [
+      "BoxContentSDK/BoxContentSDKResources/Assets/*.*",
+      "BoxContentSDK/BoxContentSDKResources/Icons/*.*",
+      "BoxContentSDK/BoxContentSDKResources/*.lproj"
+    ]
+  }
+
+  spec.xcconfig = { "OTHER_LDFLAGS": "-ObjC -all_load" }
+  spec.module_name =  "BoxContentSDK"
 
 
-  # ――― Project Settings ――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
-  #
-  #  If your library depends on compiler flags you can set them in the xcconfig hash
-  #  where they will only apply to your library. If you depend on other Podspecs
-  #  you can include multiple dependencies to ensure it works.
+  #spec.requires_arc = true
 
-  # spec.requires_arc = true
+  spec.subspec 'logger' do |logger|
+    logger.source_files = "BoxContentSDK/BoxContentSDK/BOXLog.h"
+  end
 
+  spec.subspec 'no-arc' do |noarc|
+      noarc.requires_arc = false
+      noarc.dependencies = { "box-ios-sdk/logger": []}
+      noarc.source_files = "BoxContentSDK/BoxContentSDK/External/KeychainItemWrapper/BOXKeychainItemWrapper.{h,m}", "BoxContentSDK/BoxContentSDK/External/ISO8601DateFormatter/BOXISO8601DateFormatter.{h,m}"
+  end
+  
   # spec.xcconfig = { "HEADER_SEARCH_PATHS" => "$(SDKROOT)/usr/include/libxml2" }
   # spec.dependency "JSONKit", "~> 1.4"
 
