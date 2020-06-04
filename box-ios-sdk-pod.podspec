@@ -10,7 +10,7 @@ Pod::Spec.new do |spec|
   spec.author             = { "Box" => "sdks@box.com" }
   spec.social_media_url   = "https://twitter.com/box"
   spec.ios.deployment_target = "11.0"
-  spec.source       = { :git => "https://github.com/dlpigpen/box-ios-sdk-pod.git", :tag => "v"+spec.version.to_s }
+  spec.source       = { :git => "https://github.com/dlpigpen/box-ios-sdk-pod.git", :tag => spec.version.to_s }
   spec.swift_versions = ["5.0", "5.1", "5.2"]
   spec.requires_arc = true
 
