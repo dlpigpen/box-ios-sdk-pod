@@ -144,7 +144,7 @@ Pod::Spec.new do |spec|
 
   spec.subspec 'no-arc' do |noarc|
       noarc.requires_arc = false
-      noarc.dependencies = { "box-ios-sdk/logger": []}
+      noarc.dependencies = { "box-ios-sdk-pod/logger": []}
       noarc.source_files = "BoxContentSDK/BoxContentSDK/External/KeychainItemWrapper/BOXKeychainItemWrapper.{h,m}", "BoxContentSDK/BoxContentSDK/External/ISO8601DateFormatter/BOXISO8601DateFormatter.{h,m}"
   end
   

@@ -5,7 +5,7 @@
 //  Created on 2/20/13.
 //  Copyright (c) 2013 Box. All rights reserved.
 //
-
+#import <WebKit/WebKit.h>
 #import "BOXAuthorizationViewController.h"
 #import "BOXLog.h"
 #import "BOXUser.h"
@@ -49,6 +49,7 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
 @property (nonatomic, readwrite, assign) NSInteger authChallengeCycles;
 
 @property (nonatomic, readwrite, strong) UIActivityIndicatorView *activityIndicator;
+@property (nonatomic, readwrite, strong) WKWebView *webView;
 
 #define kMaxNTLMAuthFailuresPriorToExit 3
 #define kMaxAuthChallengeCycles 100
@@ -117,8 +118,10 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
 
 - (void)dealloc
 {
-    UIWebView *webView = (UIWebView *)self.view;
-    webView.delegate = nil;
+    WKWebView *webView = (WKWebView *)self.view;
+    webView.UIDelegate = nil;
+    webView.navigationDelegate = nil;
+    
     [webView stopLoading];
     [_connection cancel];
 
@@ -126,16 +129,23 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
     [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookieAcceptPolicy:_preexistingCookiePolicy];
 }
 
+-(WKWebView *) generateWebview {
+    WKWebViewConfiguration *webConfiguration = [[WKWebViewConfiguration alloc] init];
+    WKWebView *webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration: webConfiguration];
+    return webView;
+}
+
 - (void)loadView
 {
     [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookieAcceptPolicy:NSHTTPCookieAcceptPolicyAlways];
 
-    UIWebView *webView = [[UIWebView alloc] init];
-    [webView setScalesPageToFit:YES];
-    webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    webView.delegate = self;
+    self.webView = [self generateWebview];
+//    [webView setScalesPageToFit:YES];
+    self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.webView.UIDelegate = self;
+    self.webView.navigationDelegate = self;
 
-    self.view = webView;
+    self.view = self.webView;
 }
 
 - (void)viewDidLoad
@@ -222,8 +232,7 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
             [request addValue:value forHTTPHeaderField:key];
         }
     }
-    UIWebView *webView = (UIWebView *)self.view;
-    [webView loadRequest:[request copy]];
+    [self.webView loadRequest:[request copy]];
 }
 
 - (void)completeServerTrustAuthenticationChallenge:(NSURLAuthenticationChallenge *)authenticationChallenge shouldTrust:(BOOL)trust
@@ -348,85 +357,98 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
     return (requestIsForLoginRedirectScheme && [[[request URL] absoluteString] hasPrefix:self.redirectURI]);
 }
 
-#pragma mark - UIWebViewDelegate methods
+#pragma mark - WKWebView methods
 
-- (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType
-{
-    BOXLog(@"Web view should start request %@ with navigation type %ld", request, (long)navigationType);
-    BOXLog(@"Request Headers \n%@", [request allHTTPHeaderFields]);
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
+    
+    BOOL isAllowRedirect = NO;
+    NSLog(@"%@",navigationAction.request.URL.absoluteString);
+    NSLog(@"%d", navigationAction.navigationType);
+    BOOL isLogging = [self isLoginRedirectionRequest: navigationAction.request];
+    
+    if (navigationAction.navigationType == WKNavigationTypeLinkActivated || isLogging == YES) {
+        BOXLog(@"Web view should start request %@ with navigation type %ld", request, (long)navigationType);
+        BOXLog(@"Request Headers \n%@", [request allHTTPHeaderFields]);
 
-    // Before we proceed with handling this request, check if it's about:blank - if it is, do not attempt to load it.
-    // Background: We've run into a scenario where an admin included a support help-desk plugin on their SSO page
-    // which would (probably erroneously) first load about:blank, then attempt to load its icon. The web view would
-    // fail to load about:blank, which would cause the whole page to not appear. So we realized that we can and should
-    // generally protect against loading about:blank.
-    if ([[request.URL.absoluteString lowercaseString] isEqualToString:@"about:blank"]) {
-        return NO;
-    }
+        // Before we proceed with handling this request, check if it's about:blank - if it is, do not attempt to load it.
+        // Background: We've run into a scenario where an admin included a support help-desk plugin on their SSO page
+        // which would (probably erroneously) first load about:blank, then attempt to load its icon. The web view would
+        // fail to load about:blank, which would cause the whole page to not appear. So we realized that we can and should
+        // generally protect against loading about:blank.
+        if ([[navigationAction.request.URL.absoluteString lowercaseString] isEqualToString:@"about:blank"]) {
+            isAllowRedirect = NO;
+        }
 
-    // Mailto URLs can be encountered if there is a hyperlink for sending an email.
-    if ([[[[request URL] scheme] lowercaseString] isEqualToString:@"mailto"]) {
-        [[UIApplication box_sharedApplication] box_openURL:[request URL]];
-        return NO;
-    }
+        // Mailto URLs can be encountered if there is a hyperlink for sending an email.
+        if ([[[[navigationAction.request URL] scheme] lowercaseString] isEqualToString:@"mailto"]) {
+            [[UIApplication box_sharedApplication] box_openURL:[navigationAction.request URL]];
+            isAllowRedirect = NO;
+        }
 
-    // Never load file:// urls.
-    if ([[request URL] isFileURL]) {
-        return NO;
-    }
+        // Never load file:// urls.
+        if ([[navigationAction.request URL] isFileURL]) {
+            isAllowRedirect = NO;
+        }
 
-    // Figure out whether this request is the redirect used at the end of the authentication process
-    BOOL requestIsForLoginRedirection = [self isLoginRedirectionRequest:request];
+        // Figure out whether this request is the redirect used at the end of the authentication process
+        BOOL requestIsForLoginRedirection = [self isLoginRedirectionRequest: navigationAction.request];
 
-    if (requestIsForLoginRedirection) {
-        [self.activityIndicator startAnimating];
+        if (requestIsForLoginRedirection) {
+            [self.activityIndicator startAnimating];
 
-        BOXOAuth2Session *OAuth2Session = (BOXOAuth2Session *)self.SDKClient.session;
-        __weak BOXAuthorizationViewController *me = self;
-        [OAuth2Session performAuthorizationCodeGrantWithReceivedURL:request.URL withCompletionBlock:^(BOXAbstractSession *session, NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (error) {
-                    if (me.completionBlock) {
-                        me.completionBlock(me, nil, error);
-                    }
-                } else {
-                    BOXUserRequest *userRequest = [me.SDKClient currentUserRequest];
-                    userRequest.requestAllUserFields = YES;
-                    [userRequest performRequestWithCompletion:^(BOXUser *user, NSError *error) {
+            BOXOAuth2Session *OAuth2Session = (BOXOAuth2Session *)self.SDKClient.session;
+            __weak BOXAuthorizationViewController *me = self;
+            [OAuth2Session performAuthorizationCodeGrantWithReceivedURL:navigationAction.request.URL withCompletionBlock:^(BOXAbstractSession *session, NSError *error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (error) {
                         if (me.completionBlock) {
-                            me.completionBlock(me, user, error);
+                            me.completionBlock(me, nil, error);
                         }
-                    }];
-                }
-            });
-        }];
-    } else if (![[[request URL] absoluteString] isEqualToString:[[request mainDocumentURL] absoluteString]]) {
-        // If it is an iFrame, there's not much we can do. We have to just let the UIWebView do the load.
-        // If we tried to use NSURLConnection to make this request, we would not know how to properly populate the
-        // iframe with the response.
-        // This means we cannot handle scenarios such as:
-        // a) The iFrame request requires HTTP Auth. We would normally want to pop up a custom dialog to collect credentials.
-        // b) The iFrame request has an invalid SSL certificate. We would normally want to pop up a warning dialog and let the user decide what to do.
-        return YES;
-    } else if ([self webViewCanBeUsedDirectlyForHost:request.URL.host] == NO) {
-        BOXLog(@"Was not authenticated, launching URLConnection and not loading the request in the web view");
-        [self.activityIndicator startAnimating];
-        self.connection = [[NSURLConnection alloc] initWithRequest:request delegate:self];
-        BOXLog(@"URLConnection is %@", self.connection);
-        return NO;
+                    } else {
+                        BOXUserRequest *userRequest = [me.SDKClient currentUserRequest];
+                        userRequest.requestAllUserFields = YES;
+                        [userRequest performRequestWithCompletion:^(BOXUser *user, NSError *error) {
+                            if (me.completionBlock) {
+                                me.completionBlock(me, user, error);
+                            }
+                        }];
+                    }
+                });
+            }];
+            
+            decisionHandler(WKNavigationActionPolicyCancel);
+            
+        } else if (![[[navigationAction.request URL] absoluteString] isEqualToString:[[navigationAction.request mainDocumentURL] absoluteString]]) {
+            // If it is an iFrame, there's not much we can do. We have to just let the UIWebView do the load.
+            // If we tried to use NSURLConnection to make this request, we would not know how to properly populate the
+            // iframe with the response.
+            // This means we cannot handle scenarios such as:
+            // a) The iFrame request requires HTTP Auth. We would normally want to pop up a custom dialog to collect credentials.
+            // b) The iFrame request has an invalid SSL certificate. We would normally want to pop up a warning dialog and let the user decide what to do.
+            isAllowRedirect = YES;
+            decisionHandler(WKNavigationActionPolicyAllow);
+        } else if ([self webViewCanBeUsedDirectlyForHost: navigationAction.request.URL.host] == NO) {
+            BOXLog(@"Was not authenticated, launching URLConnection and not loading the request in the web view");
+            [self.activityIndicator startAnimating];
+            self.connection = [[NSURLConnection alloc] initWithRequest:navigationAction.request.URL delegate:self];
+            BOXLog(@"URLConnection is %@", self.connection);
+            isAllowRedirect = NO;
+            
+            decisionHandler(WKNavigationActionPolicyCancel);
+        }
+    } else {
+        decisionHandler(WKNavigationActionPolicyAllow);
     }
 
-    return YES;
 }
-
-- (void)webViewDidStartLoad:(UIWebView *)webView
-{
+    
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     BOXLogFunction();
-    [self.activityIndicator startAnimating];
+    [self.activityIndicator stopAnimating];
 }
-
-- (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error
-{
+    
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+ 
     BOXLog(@"Web view %@ did fail load with error %@", webView, error);
 
     // The following error scenarios are benign and do not actually signify that loading the login page has failed:
@@ -458,7 +480,7 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
         BOXLog(@"Checking if error is due to an iframe request.");
         BOXLog(@"Request URL is %@ while main document URL is %@", requestURLString, [webView.request mainDocumentURL]);
 
-        BOOL isMainDocumentURL = [requestURLString isEqualToString:[[webView.request mainDocumentURL] absoluteString]];
+        BOOL isMainDocumentURL = [requestURLString isEqualToString:[webView.URL absoluteString]];
         if (isMainDocumentURL == NO) {
             // If the failing URL is not the main document URL, then the load error is in an iframe and can be ignored
             BOXLog(@"Ignoring error as the load failure is in an iframe");
@@ -472,12 +494,6 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
         [webView loadHTMLString:[error localizedDescription] baseURL:nil];
     }
 
-    [self.activityIndicator stopAnimating];
-}
-
-- (void)webViewDidFinishLoad:(UIWebView *)webView
-{
-    BOXLogFunction();
     [self.activityIndicator stopAnimating];
 }
 
@@ -646,10 +662,8 @@ typedef void (^BOXAuthCancelBlock)(BOXAuthorizationViewController *authorization
     BOXLog(@"Connection %@ did finish loading. Requesting that the webview load the data (%lu bytes) with reponse %@", connection, (unsigned long)[self.connectionData length], self.connectionResponse);
     [self setWebViewCanBeUsedDirectly:YES forHost:connection.currentRequest.URL.host];
     [self setWebViewCanBeUsedDirectly:YES forHost:[self.connectionResponse URL].host];
-    [(UIWebView *)self.view loadData:self.connectionData
-                            MIMEType:[self.connectionResponse MIMEType]
-                    textEncodingName:[self.connectionResponse textEncodingName]
-                             baseURL:[self.connectionResponse URL]];
+    [self.webView loadData:self.connectionData MIMEType:[self.connectionResponse MIMEType] characterEncodingName:[self.connectionResponse textEncodingName] baseURL:[self.connectionResponse URL]];
+     
 
     self.connection = nil;
     self.connectionResponse = nil;
